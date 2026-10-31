@@ -1,0 +1,727 @@
+// EventHub schema. Money is Decimal(14,2) in the event currency (NGN default).
+// Financial history is append-only: OrganizerLedgerEntry rows are never updated or deleted;
+// mistakes are corrected with reversing entries.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  ORGANIZER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum EmailTokenType {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  UNPUBLISHED
+  CANCELLED
+  SUSPENDED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  NEEDS_REVIEW // paid at gateway but we could not safely issue tickets (e.g. sold out after expiry)
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNDERPAID
+  EXPIRED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  REFUNDED
+  CANCELLED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum LedgerType {
+  SALE
+  COMMISSION
+  REFUND
+  COMMISSION_REVERSAL
+  PAYOUT
+  ADJUSTMENT
+}
+
+enum SettlementStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum StaffRole {
+  SCANNER
+  ATTENDEE_VIEWER
+  MANAGER
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWING
+  ACTIONED
+  DISMISSED
+}
+
+model User {
+  id               String        @id @default(cuid())
+  email            String        @unique
+  passwordHash     String
+  name             String
+  phone            String?
+  role             Role          @default(CUSTOMER)
+  status           AccountStatus @default(ACTIVE)
+  emailVerifiedAt  DateTime?
+  failedLogins     Int           @default(0)
+  lockedUntil      DateTime?
+  marketingConsent Boolean       @default(false)
+  consentAt        DateTime?
+  notifyPrefs      Json          @default("{}")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  sessions        Session[]
+  emailTokens     EmailToken[]
+  organizer       OrganizerProfile?
+  orders          Order[]
+  favorites       FavoriteEvent[]
+  staffAssignments EventStaff[]
+  notifications   Notification[]
+  reportsMade     EventReport[]   @relation("Reporter")
+  supportRequests SupportRequest[]
+
+  @@index([role])
+  @@index([status])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  csrfToken  String
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip         String?
+  userAgent  String?
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EmailToken {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      EmailTokenType
+  tokenHash String         @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime       @default(now())
+
+  @@index([userId, type])
+}
+
+model OrganizerProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandName          String
+  bio                String?
+  logoUrl            String?
+  website            String?
+  supportEmail       String?
+  // Manual payout destination (only used by the admin payout workflow; never exposed publicly)
+  payoutBankName     String?
+  payoutAccountName  String?
+  payoutAccountLast4 String?
+  payoutAccountEnc   String?
+  suspended          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  events      Event[]
+  ledger      OrganizerLedgerEntry[]
+  settlements Settlement[]
+}
+
+model EventCategory {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  slug      String  @unique
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+  events    Event[]
+}
+
+model Event {
+  id                      String      @id @default(cuid())
+  organizerId             String
+  organizer               OrganizerProfile @relation(fields: [organizerId], references: [id])
+  categoryId              String?
+  category                EventCategory? @relation(fields: [categoryId], references: [id])
+  title                   String
+  slug                    String      @unique
+  shortDescription        String?
+  description             String?
+  status                  EventStatus @default(DRAFT)
+  scheduledPublishAt      DateTime?
+  publishedAt             DateTime?
+  startsAt                DateTime?
+  endsAt                  DateTime?
+  timezone                String      @default("Africa/Lagos")
+  venueName               String?
+  city                    String?
+  address                 String?
+  onlineUrl               String?
+  venueInstructions       String?
+  mapUrl                  String?
+  bannerUrl               String?
+  entryInstructions       String?
+  refundPolicy            String?
+  ageRestriction          String?
+  terms                   String?
+  ticketDesign            Json        @default("{}")
+  customQuestions         Json        @default("[]")
+  currency                String      @default("NGN")
+  commissionOverridePercent Decimal?  @db.Decimal(5, 2)
+  commissionOverrideFixed   Decimal?  @db.Decimal(14, 2)
+  featured                Boolean     @default(false)
+  moderationNote          String?
+  // Refund requests by customers are accepted until this instant. Null = customer refund requests
+  // are not offered (organizer/admin can still refund, and cancellations refund automatically).
+  refundDeadline          DateTime?
+  // Denormalised listing stats, maintained by services/inventory.js recalcEventStats().
+  minPrice                Decimal?    @db.Decimal(14, 2)
+  ticketsSold             Int         @default(0)
+  ticketsRemaining        Int         @default(0)
+  viewCount               Int         @default(0)
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  images      EventImage[]
+  ticketTypes TicketType[]
+  orders      Order[]
+  tickets     Ticket[]
+  staff       EventStaff[]
+  invitations StaffInvitation[]
+  favorites   FavoriteEvent[]
+  reports     EventReport[]
+  discounts   DiscountCode[]
+  waitlist    WaitlistEntry[]
+  appeals     ModerationAppeal[]
+
+  @@index([status, startsAt])
+  @@index([organizerId])
+  @@index([city])
+  @@index([categoryId])
+  @@index([featured])
+  @@index([ticketsSold])
+  @@index([minPrice])
+}
+
+model EventImage {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+}
+
+model TicketType {
+  id               String   @id @default(cuid())
+  eventId          String
+  event            Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name             String
+  description      String?
+  price            Decimal  @db.Decimal(14, 2)
+  quantityTotal    Int
+  quantitySold     Int      @default(0)
+  quantityReserved Int      @default(0)
+  minPerOrder      Int      @default(1)
+  maxPerOrder      Int      @default(10)
+  perCustomerLimit Int?
+  salesStartAt     DateTime?
+  salesEndAt       DateTime?
+  visible          Boolean  @default(true)
+  active           Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  orderItems OrderItem[]
+  tickets    Ticket[]
+  waitlist   WaitlistEntry[]
+
+  @@index([eventId])
+  // Database-level oversell guard is added in the migration:
+  //   CHECK ("quantitySold" + "quantityReserved" <= "quantityTotal")
+}
+
+model DiscountCode {
+  id         String    @id @default(cuid())
+  eventId    String
+  event      Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  code       String
+  percentOff Decimal?  @db.Decimal(5, 2)
+  amountOff  Decimal?  @db.Decimal(14, 2)
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  expiresAt  DateTime?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  orders Order[]
+
+  @@unique([eventId, code])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  reference       String      @unique
+  userId          String?
+  user            User?       @relation(fields: [userId], references: [id])
+  buyerName       String
+  buyerEmail      String
+  buyerPhone      String?
+  // Guests retrieve tickets with this token (stored hashed). The raw token is emailed / returned once.
+  accessTokenHash String?
+  eventId         String
+  event           Event       @relation(fields: [eventId], references: [id])
+  status          OrderStatus @default(PENDING)
+  currency        String      @default("NGN")
+  subtotal        Decimal     @db.Decimal(14, 2)
+  discountTotal   Decimal     @default(0) @db.Decimal(14, 2)
+  total           Decimal     @db.Decimal(14, 2)
+  commissionTotal Decimal     @default(0) @db.Decimal(14, 2)
+  commissionPercentApplied Decimal @default(0) @db.Decimal(5, 2)
+  commissionFixedApplied   Decimal @default(0) @db.Decimal(14, 2)
+  organizerNet    Decimal     @default(0) @db.Decimal(14, 2)
+  gatewayFee      Decimal?    @db.Decimal(14, 2)
+  refundedTotal   Decimal     @default(0) @db.Decimal(14, 2)
+  discountCodeId  String?
+  discountCode    DiscountCode? @relation(fields: [discountCodeId], references: [id])
+  referralSource  String?
+  attendeeInfo    Json        @default("[]")
+  reservedUntil   DateTime?
+  inventoryReleased Boolean   @default(false)
+  paidAt          DateTime?
+  reviewNote      String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items       OrderItem[]
+  tickets     Ticket[]
+  payments    Payment[]
+  commissions CommissionRecord[]
+  refunds     Refund[]
+  ledger      OrganizerLedgerEntry[]
+
+  @@index([eventId, status])
+  @@index([userId])
+  @@index([buyerEmail])
+  @@index([status, reservedUntil])
+}
+
+model OrderItem {
+  id           String     @id @default(cuid())
+  orderId      String
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTypeId String
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+  quantity     Int
+  // Price snapshot taken at checkout creation. Later price edits never change it.
+  unitPrice    Decimal    @db.Decimal(14, 2)
+  discount     Decimal    @default(0) @db.Decimal(14, 2)
+  lineTotal    Decimal    @db.Decimal(14, 2)
+  commission   Decimal    @default(0) @db.Decimal(14, 2)
+
+  tickets Ticket[]
+
+  @@index([orderId])
+}
+
+model Ticket {
+  id             String       @id @default(cuid())
+  // High-entropy opaque token. This (and only this) is encoded in the QR code.
+  code           String       @unique
+  number         String       @unique // human-readable, e.g. EH-7K3Q-9XPA
+  orderId        String
+  order          Order        @relation(fields: [orderId], references: [id])
+  orderItemId    String
+  orderItem      OrderItem    @relation(fields: [orderItemId], references: [id])
+  eventId        String
+  event          Event        @relation(fields: [eventId], references: [id])
+  ticketTypeId   String
+  ticketType     TicketType   @relation(fields: [ticketTypeId], references: [id])
+  holderName     String?
+  holderEmail    String?
+  answers        Json         @default("{}")
+  status         TicketStatus @default(VALID)
+  checkedInAt    DateTime?
+  createdAt      DateTime     @default(now())
+
+  checkIn CheckIn?
+
+  @@index([eventId, status])
+  @@index([orderId])
+  @@index([holderEmail])
+}
+
+model CheckIn {
+  id          String   @id @default(cuid())
+  ticketId    String   @unique
+  ticket      Ticket   @relation(fields: [ticketId], references: [id])
+  eventId     String
+  scannedById String
+  method      String   @default("QR") // QR | MANUAL
+  clientScanId String?
+  scannedAt   DateTime @default(now())
+
+  @@index([eventId, scannedAt])
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id])
+  provider         String        @default("bachs")
+  status           PaymentStatus @default(INITIATED)
+  amount           Decimal       @db.Decimal(14, 2)
+  currency         String
+  idempotencyKey   String        @unique
+  gatewayCheckoutId String?      @unique
+  gatewayChargeId  String?
+  checkoutUrl      String?
+  amountPaid       Decimal?      @db.Decimal(14, 2)
+  gatewayFee       Decimal?      @db.Decimal(14, 2)
+  lastGatewayStatus String?
+  failureReason    String?
+  verifiedAt       DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([status, createdAt])
+}
+
+model PaymentWebhookEvent {
+  id          String        @id @default(cuid())
+  provider    String        @default("bachs")
+  eventId     String        // gateway event id (deduplication key)
+  type        String
+  payloadHash String
+  payload     Json
+  status      WebhookStatus @default(RECEIVED)
+  attempts    Int           @default(0)
+  error       String?
+  receivedAt  DateTime      @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
+}
+
+model CommissionRecord {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id])
+  percent      Decimal  @db.Decimal(5, 2)
+  fixedPerTicket Decimal @db.Decimal(14, 2)
+  amount       Decimal  @db.Decimal(14, 2)
+  reversedAmount Decimal @default(0) @db.Decimal(14, 2)
+  currency     String
+  createdAt    DateTime @default(now())
+
+  // One commission record per order: prevents charging the same transaction twice.
+  @@unique([orderId])
+}
+
+model OrganizerLedgerEntry {
+  id             String           @id @default(cuid())
+  organizerId    String
+  organizer      OrganizerProfile @relation(fields: [organizerId], references: [id])
+  type           LedgerType
+  // Signed effect on the amount the platform owes the organizer. SALE +, COMMISSION -, REFUND -, PAYOUT -.
+  amount         Decimal          @db.Decimal(14, 2)
+  currency       String
+  orderId        String?
+  order          Order?           @relation(fields: [orderId], references: [id])
+  refundId       String?
+  settlementId   String?
+  settlement     Settlement?      @relation(fields: [settlementId], references: [id])
+  // Money is not payable to the organizer before this instant (refund-risk hold).
+  availableAt    DateTime?
+  idempotencyKey String           @unique
+  memo           String?
+  createdAt      DateTime         @default(now())
+
+  @@index([organizerId, createdAt])
+  @@index([orderId])
+}
+
+model Settlement {
+  id          String           @id @default(cuid())
+  organizerId String
+  organizer   OrganizerProfile @relation(fields: [organizerId], references: [id])
+  amount      Decimal          @db.Decimal(14, 2)
+  currency    String
+  status      SettlementStatus @default(REQUESTED)
+  method      String           @default("BANK_TRANSFER")
+  // External reference recorded by the admin who performed the transfer outside this app.
+  externalReference String?
+  note        String?
+  requestedById String?
+  approvedById  String?
+  paidById      String?
+  paidAt      DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  ledger OrganizerLedgerEntry[]
+
+  @@index([organizerId, status])
+}
+
+model Refund {
+  id              String       @id @default(cuid())
+  orderId         String
+  order           Order        @relation(fields: [orderId], references: [id])
+  requestedById   String?
+  amount          Decimal      @db.Decimal(14, 2)
+  reason          String?
+  ticketIds       Json         @default("[]")
+  status          RefundStatus @default(REQUESTED)
+  reviewedById    String?
+  reviewNote      String?
+  idempotencyKey  String       @unique
+  gatewayRefundId String?
+  failureReason   String?
+  isEventCancellation Boolean  @default(false)
+  completedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model EventStaff {
+  id        String    @id @default(cuid())
+  eventId   String
+  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      StaffRole @default(SCANNER)
+  createdAt DateTime  @default(now())
+
+  @@unique([eventId, userId])
+}
+
+model StaffInvitation {
+  id          String    @id @default(cuid())
+  eventId     String
+  event       Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  email       String
+  role        StaffRole @default(SCANNER)
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([eventId])
+  @@index([email])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+// Email outbox: messages are written in the same transaction as the business change, then sent
+// by the worker with retries. SMTP trouble can never corrupt an order.
+model EmailDeliveryLog {
+  id            String      @id @default(cuid())
+  dedupeKey     String?     @unique
+  toEmail       String
+  subject       String
+  template      String
+  data          Json
+  status        EmailStatus @default(PENDING)
+  attempts      Int         @default(0)
+  lastError     String?
+  nextAttemptAt DateTime    @default(now())
+  sentAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([status, nextAttemptAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorRole  String?
+  action     String
+  entityType String
+  entityId   String?
+  eventId    String?
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([eventId, createdAt])
+  @@index([action])
+}
+
+model FavoriteEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+}
+
+model EventReport {
+  id         String       @id @default(cuid())
+  eventId    String
+  event      Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  reporterId String?
+  reporter   User?        @relation("Reporter", fields: [reporterId], references: [id])
+  reason     String
+  details    String?
+  status     ReportStatus @default(OPEN)
+  resolution String?
+  resolvedById String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([status])
+}
+
+model ModerationAppeal {
+  id        String       @id @default(cuid())
+  eventId   String
+  event     Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  message   String
+  status    ReportStatus @default(OPEN)
+  response  String?
+  decidedById String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+model SupportRequest {
+  id        String       @id @default(cuid())
+  userId    String?
+  user      User?        @relation(fields: [userId], references: [id])
+  email     String
+  subject   String
+  message   String
+  status    ReportStatus @default(OPEN)
+  reply     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model WaitlistEntry {
+  id           String      @id @default(cuid())
+  eventId      String
+  event        Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketTypeId String?
+  ticketType   TicketType? @relation(fields: [ticketTypeId], references: [id])
+  email        String
+  notifiedAt   DateTime?
+  createdAt    DateTime    @default(now())
+
+  @@unique([eventId, email])
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  body      String
+  active    Boolean   @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+}

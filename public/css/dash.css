@@ -1,0 +1,92 @@
+/* EventHub v2: organizer + admin dashboards */
+body.dash { background: var(--bg); }
+.shell { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
+.side { background: #080910; color: #d9dcf2; padding: var(--s5) var(--s3); position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #1c1f33; }
+.side .brand { color: #fff; padding: 0 12px var(--s5); }
+.side a, .side button.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; color: #aeb2cf; text-decoration: none; background: none; border: 0; font: inherit; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s, color .15s; }
+.side a:hover, .side button.nav-item:hover { background: rgba(255,255,255,.06); color: #fff; } .side a[aria-current="page"] { background: rgba(109,99,255,.18); color: #fff; box-shadow: inset 3px 0 0 var(--gold); }
+.side .spacer { flex: 1; } .side small { padding: 6px 12px; color: #8286a3; }
+.content { padding: var(--s6) var(--s7); min-width: 0; max-width: 1400px; } .content > header { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: var(--s6); } .content > header h1 { font-size: var(--fs-4); margin: 0; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--s5); box-shadow: var(--shadow-1); } .stat .k { color: var(--muted); font-size: var(--fs-0); font-weight: 600; } .stat .v { font-family: var(--font-display); font-size: 2.1rem; font-weight: 700; letter-spacing: -.04em; font-variant-numeric: tabular-nums; line-height: 1.2; } .stat .n { font-size: 12px; color: var(--muted); }
+.stepper { display: flex; gap: 8px; margin-bottom: var(--s5); flex-wrap: wrap; } .stepper .st { padding: 6px 14px; border-radius: var(--pill); background: var(--line-2); color: var(--muted); font-weight: 600; font-size: var(--fs-0); } .stepper .st.on { background: var(--coral); color: #fff; } .stepper .st.done { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.checklist li { list-style: none; padding: 6px 0; } .checklist { padding: 0; margin: 0; } .checklist .ok::before { content: '✔ '; color: var(--ok); } .checklist .no::before { content: '✖ '; color: var(--danger); }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: var(--s4); align-items: end; } .toolbar .field { margin: 0; }
+.bar { height: 8px; border-radius: 999px; background: var(--line-2); overflow: hidden; } .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--coral), var(--violet)); border-radius: 999px; }
+.menu-toggle { display: none; }
+@media (max-width: 880px) { .shell { grid-template-columns: 1fr; } .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; padding: 10px; } .side .brand { padding: 4px 8px; } .side .spacer { display: none; } .content { padding: var(--s4); } }
+.scan { max-width: 560px; margin: 0 auto; } #reader { width: 100%; border-radius: var(--r-2); overflow: hidden; background: #000; min-height: 240px; }
+.scan-result { padding: var(--s5); border-radius: var(--r-2); text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 1.4rem; margin-top: var(--s4); } .scan-result.ok { background: var(--ok); color: #fff; } .scan-result.bad { background: var(--danger); color: #fff; } .scan-result.warn { background: var(--gold); color: #1a1405; } .scan-result small { display: block; font-family: var(--font); font-weight: 500; font-size: .9rem; margin-top: 6px; opacity: .95; }
+
+/* ---------- finishing touches ---------- */
+.stat { position: relative; overflow: hidden; transition: transform .15s, box-shadow .15s; } .stat::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: linear-gradient(180deg, var(--coral), var(--violet)); } .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.content > header { padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.side .brand-mark { width: 28px; height: 28px; }
+.toolbar { padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2); }
+.scan-result { animation: modal-in .2s ease; }
+
+.side a .ico { opacity: .75; } .side a:hover .ico, .side a[aria-current="page"] .ico { opacity: 1; } .side a[aria-current="page"] .ico { color: var(--gold); }
+
+/* ---------- mobile & small-screen hardening ---------- */
+@media (hover: none) { .stat:hover { transform: none; box-shadow: var(--shadow-1); } }
+@media (max-width: 880px) {
+  /* sidebar becomes a sticky, swipeable top bar instead of a tall pile of wrapped links */
+  html { scroll-padding-top: 72px; }
+  .side { position: sticky; top: 0; z-index: 40; height: auto; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid #1c1f33; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .side::-webkit-scrollbar { display: none; }
+  .side > * { flex: none; white-space: nowrap; }
+  .side .brand { padding: 4px 10px 4px 6px; }
+  .side small { display: none; }
+  .side a[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--gold); }
+  .content { padding: var(--s4) var(--s4) var(--s6); }
+  .content > header { margin-bottom: var(--s4); padding-bottom: var(--s3); }
+}
+@media (max-width: 640px) {
+  .content .g3, .content .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* stat tiles stay 2-up */
+  .stat { padding: var(--s3) var(--s4); } .stat .v { font-size: clamp(1.2rem, 5.6vw, 1.7rem); overflow-wrap: anywhere; }
+  .toolbar { padding: var(--s3); } .toolbar .field { flex: 1 1 140px; min-width: 0; } .toolbar > .btn { flex: 1 1 auto; }
+  .stepper .st { padding: 5px 12px; }
+  .scan-result { padding: var(--s4); font-size: 1.2rem; }
+}
+@media (max-width: 380px) { .content .g3, .content .g4 { grid-template-columns: 1fr; } }
+
+/* =========== EventHub v3 night theme: dashboards (restrained) =========== */
+.side { background: #0d0618; border-right-color: #2a1749; }
+.side a, .side button.nav-item { color: #cdbbea; }
+.side a:hover, .side button.nav-item:hover { background: rgba(255,255,255,.07); color: #fff7e6; }
+.side a[aria-current="page"] { background: rgba(255,209,102,.1); color: #fff7e6; }
+.side .brand { color: #fff7e6; letter-spacing: .08em; text-transform: uppercase; }
+.side small { color: #a994cc; }
+.content > header { border-bottom-color: var(--line); }
+.stat::before { background: var(--gold); }
+.stat .v { font-size: 2.4rem; font-weight: 600; letter-spacing: .01em; }
+.bar > i { background: var(--gold); }
+.stepper .st.on { background: var(--gold); color: #1a1030; }
+.scan-result { font-size: 1.7rem; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+@media (max-width: 640px) {
+  .stat .v { font-size: clamp(1.7rem, 8vw, 2.2rem); }
+  .scan-result { font-size: 1.5rem; }
+}
+
+/* =========== v5 premium pass: dashboards =========== */
+.side .brand { font-family: var(--font-display); font-size: 1.4rem; text-transform: none; letter-spacing: -.02em; }
+/* the sidebar's ".side a { background: none }" was wiping the gradient that the wordmark text is clipped to, leaving transparent text. Re-assert it here (and on hover) so the name always shows. */
+.side .brand, .side .brand:hover, .side .brand:focus-visible { background: linear-gradient(100deg, #fff7e6 0%, #ffd166 55%, #f2b01e 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
+.stat .v { font-family: var(--font); font-size: clamp(1.4rem, 1.1rem + 1.3vw, 2.4rem); font-weight: 800; letter-spacing: -.02em; }
+.stat .k { font-size: .8125rem; letter-spacing: .02em; }
+.content > header h1 { font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem); }
+.scan-result { font-family: var(--font); font-weight: 800; }
+
+/* =========== v5 mobile navigation: tidy wrapped pills instead of a hidden sideways-scrolling strip =========== */
+@media (max-width: 880px) {
+  html { scroll-padding-top: 0; }
+  .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; padding: 14px 14px 16px; overflow: visible; border-right: 0; border-bottom: 1px solid #2a1749; }
+  .side .brand { flex: 0 0 100%; justify-content: flex-start; text-align: left; border: 0; padding: 2px 4px 8px; font-size: 1.5rem; }
+  .side .brand::after { display: none; }
+  .side a, .side button.nav-item { padding: 8px 14px; min-height: 38px; font-size: .875rem; line-height: 1.2; border-radius: 999px; border: 1px solid #2a1749; background: rgba(255,255,255,.04); white-space: nowrap; justify-content: center; }
+  .side a:hover, .side button.nav-item:hover { background: rgba(255,255,255,.09); }
+  .side a[aria-current="page"] { background: var(--gold); border-color: var(--gold); color: #1a1030; box-shadow: none; }
+  .side a[aria-current="page"] .ico { color: #1a1030; }
+  /* the desktop spacer becomes a thin divider between the main links and the account links */
+  .side .spacer { display: block; flex: 0 0 100%; height: 1px; margin: 4px 0; background: #2a1749; }
+  .side small { display: none; }
+}
