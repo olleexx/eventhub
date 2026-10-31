@@ -105,3 +105,11 @@ export function createApp() {
   app.use(errorHandler);
   return app;
 }
+
+// Default export for hosts that load this file directly as the entry (Vercel detects src/app.js and requires a
+// default export that is a function). Builds the app on first request; the named createApp() above is unchanged.
+let cachedApp;
+export default function handler(req, res) {
+  cachedApp ??= createApp();
+  return cachedApp(req, res);
+}
