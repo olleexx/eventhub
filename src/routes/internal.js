@@ -14,7 +14,9 @@ router.use((req, res, next) => {
   next();
 });
 
-router.post('/cron/:task', asyncHandler(async (req, res) => {
+// Vercel Cron calls with GET (and sends `Authorization: Bearer $CRON_SECRET`); external schedulers can use POST.
+router.all('/cron/:task', asyncHandler(async (req, res) => {
+  if (req.method !== 'GET' && req.method !== 'POST') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Use GET or POST');
   const name = req.params.task;
   if (name !== 'all' && !TASKS[name]) throw new AppError(404, 'UNKNOWN_TASK', 'Unknown task');
   const result = name === 'all' ? await (await import('../jobs/tasks.js')).runAll() : await runTask(name);

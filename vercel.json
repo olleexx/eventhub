@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.js": { "includeFiles": "{public/**,prisma/**}", "maxDuration": 30 }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index.js" }],
+  "crons": [{ "path": "/internal/cron/all", "schedule": "0 3 * * *" }]
+}
